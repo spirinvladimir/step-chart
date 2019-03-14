@@ -1,10 +1,12 @@
 var div = document.getElementById('chart');
+var canvas = document.createElement('canvas');
+div.appendChild(canvas);
 var comp_styles = window.getComputedStyle(div);
 var w = Number(comp_styles.getPropertyValue('width').replace('px', ''));
 var h = Number(comp_styles.getPropertyValue('height').replace('px', ''));
-var canvas = document.createElement('canvas');
 canvas.setAttribute('width', w);
 canvas.setAttribute('height', h);
+
 w = new Fraction(w);
 h = new Fraction(h);
 
@@ -18,7 +20,6 @@ var fo = h.mul(0.1);
 var dot = h.mul(0.01);
 var line = h.mul(0.006);
 
-div.appendChild(canvas);
 var ctx = canvas.getContext('2d');
 
 //
@@ -153,6 +154,7 @@ function update_min_max (frame) {
     frame.max = frame.min = points[frame.index_first - 1]
         ? points[frame.index_first - 1].price
         : points[frame.index_first].price;
+    if (frame.index_first === 0) return
     for (var i = frame.index_first - 1; i <= frame.index_last; i++) {
         if (points[i].price.compare(frame.max) > 0) frame.max = points[i].price
         if (points[i].price.compare(frame.min) < 0) frame.min = points[i].price
@@ -378,7 +380,33 @@ function debug_graphics(g) {
 }
 
 function render (frame) {
+
     test_min_max(frame);
+
+    return frame.norm.equals(0)
+        ? render_one_center_line(frame)
+        : render_wWw(frame)
+}
+
+window['2PI'] = 2 * Math.PI;
+
+function render_one_center_line (frame) {
+    var y = fo.add(fh.mul(0.5)).valueOf();
+    var x = 0;
+    ctx.clearRect(0, 0, w.valueOf(), h.valueOf());
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(w.valueOf(), y);
+    for (var i = frame.index_first; i <= frame.index_last; i++) {
+        var {time} = points[i];
+        var cx = w.mul(time.sub(frame.t0).div(t_period)).valueOf();
+        var cy = y;
+        ctx.arc(cx, cy, dot.valueOf(), 0, window['2PI']);
+    }
+
+}
+
+function render_wWw (frame) {
     var
         price = points[frame.index_first - 1] === undefined
             ? points[frame.index_first].price
@@ -416,31 +444,38 @@ var tz = t_start.add(t_period);
 var scale = false;
 var m;
 
-div.onwheel = e => {
-    if (e.deltaY > 0) {
-        if (e.shiftKey) {//zoom_in
-            m = new Fraction(e.offsetX);
-            t  = t.add(one.sub(s_in).mul(t_period).mul(m).div(w))
-            t_period = t_period.mul(s_in)
-            dt = dt.mul(s_in)
-            tz = t.add(t_period)
-        } else {//left
-            t = t.sub(dt)
-            tz = tz.sub(dt)
-        }
-    } else {
-        if (e.shiftKey) {//zoom_out
-            m = new Fraction(e.offsetX);
-            t  = t.add(one.sub(s_out).mul(t_period).mul(m).div(w))
-            t_period = t_period.mul(s_out)
-            dt = dt.mul(s_out)
-            tz = t.add(t_period)
-        } else {//right
-            t = t.add(dt)
-            tz = tz.add(dt)
-        }
+var action = {
+    zoom_in: m => {
+        m = new Fraction(m);
+        t  = t.add(one.sub(s_in).mul(t_period).mul(m).div(w))
+        t_period = t_period.mul(s_in)
+        dt = dt.mul(s_in)
+        tz = t.add(t_period)
+    },
+    left: () => {
+        t = t.sub(dt)
+        tz = tz.sub(dt)
+    },
+    zoom_out: m => {
+        m = new Fraction(m);
+        t  = t.add(one.sub(s_out).mul(t_period).mul(m).div(w))
+        t_period = t_period.mul(s_out)
+        dt = dt.mul(s_out)
+        tz = t.add(t_period)
+    },
+    right: () => {
+        t = t.add(dt)
+        tz = tz.add(dt)
     }
 }
+div.onwheel = e =>
+    e.deltaY > 0
+        ? e.shiftKey
+            ? action.zoom_in(e.offsetX)
+            : action.left()
+        : e.shiftKey
+            ? action.zoom_out(e.offsetX)
+            : action.right()
 
 function zoom_in (t0, tn) {
     frame = create_frame_in(frame, t0, tn);
@@ -472,7 +507,7 @@ function right (t0, tn) {
 function next () {
     if (t.compare(frame.t0) < 0)
         if  (tz.compare(frame.tn) > 0)
-            zoom_out(t, tz)
+            zoom_in(t, tz)//zoom_out ERROR
         else
             left (t, tz)
     else if (t.compare(frame.t0) > 0)
